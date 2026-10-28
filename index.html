@@ -856,8 +856,9 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
  if(!profile.name)profile.name='Player'; if(!profile.avatar)profile.avatar='♟'; if(typeof profile.sound!=='boolean')profile.sound=true;
  const statsKey='lufanPlayerStats'; let stats={matches:0,wins:0,rolls:0,streak:0};
  try{stats={...stats,...JSON.parse(localStorage.getItem(statsKey)||'{}')}}catch(e){}
- const saveProfile=()=>{try{localStorage.setItem('lufanPlayerProfile',JSON.stringify(profile))}catch(e){};render()};
- const saveStats=()=>{try{localStorage.setItem(statsKey,JSON.stringify(stats))}catch(e){};render()};
+ const emitCloudSave=()=>{if(auth.loggedIn&&auth.uid)window.dispatchEvent(new CustomEvent('lufan-cloud-profile-save',{detail:{profile,stats}}))};
+ const saveProfile=()=>{try{localStorage.setItem('lufanPlayerProfile',JSON.stringify(profile))}catch(e){};render();emitCloudSave()};
+ const saveStats=()=>{try{localStorage.setItem(statsKey,JSON.stringify(stats))}catch(e){};render();emitCloudSave()};
  function toast(msg){const t=$('lpfToast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2300)}
  function render(){ $('lpfHeroAvatar').textContent=profile.avatar;$('lpfHeroName').textContent=profile.name;$('lpfPlayerId').textContent=profile.id;
   const rate=stats.matches?((stats.wins/stats.matches)*100).toFixed(1)+'%':'—';
@@ -874,10 +875,10 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
  $('lpfClose').addEventListener('click',closeProfile);$('lpfEditAction').addEventListener('click',openEdit);
  $('lpfEditCancel').addEventListener('click',closeEdit);
  $('lpfEditSave').addEventListener('click',()=>{const name=$('lpfNameInput').value.trim();if(!name){toast('Please enter a player name.');return}profile.name=name.slice(0,24);saveProfile();closeEdit();toast('Profile saved on this device.')});
- $('lpfAvatarGrid').addEventListener('click',e=>{const b=e.target.closest('[data-avatar]');if(!b)return;profile.avatar=b.dataset.avatar;render()});
+ $('lpfAvatarGrid').addEventListener('click',e=>{const b=e.target.closest('[data-avatar]');if(!b)return;profile.avatar=b.dataset.avatar;saveProfile();toast('Avatar saved.')});
  $('lpfCopyId').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(profile.id);toast('Player ID copied.')}catch(e){const ta=document.createElement('textarea');ta.value=profile.id;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Player ID copied.')}catch(_){toast('Player ID: '+profile.id)}ta.remove()}});
  $('lpfSoundAction').addEventListener('click',()=>{profile.sound=!profile.sound;saveProfile();toast('Profile sound preference updated. This does not change in-game audio yet.')});
- $('lpfPrivacyAction').addEventListener('click',()=>toast('Profile data is stored locally in this browser; clearing browser data may remove it.'));
+ $('lpfPrivacyAction').addEventListener('click',()=>toast(auth.loggedIn?'Profile is saved on this device and synced to your Firebase account.':'Profile data is stored locally until you sign in.'));
  function confirmAction(title,desc,yes){$('lpfConfirmTitle').textContent=title;$('lpfConfirmText').textContent=desc;$('lpfConfirmYes').onclick=()=>{confirmModal.classList.remove('open');yes()};confirmModal.classList.add('open')}
  $('lpfResetStats').addEventListener('click',()=>confirmAction('Reset statistics?','Your locally saved profile statistics will be reset to zero.',()=>{stats={matches:0,wins:0,rolls:0,streak:0};saveStats();toast('Statistics reset.')}));
  $('lpfConfirmCancel').addEventListener('click',()=>confirmModal.classList.remove('open'));
@@ -889,7 +890,8 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
  $('lpfAuthCancel').addEventListener('click',()=>authModal.classList.remove('open'));
  $('lpfAuthSubmit').addEventListener('click',()=>{const mode=authModal.dataset.mode||'Login';const name=$('lpfAuthName').value.trim(),email=$('lpfAuthEmail').value.trim(),password=$('lpfAuthPassword').value;if(!email||!$('lpfAuthEmail').checkValidity()||!password||password.length<6||(mode==='Sign In'&&!name)){toast('Enter a valid email and password (at least 6 characters).');return}window.dispatchEvent(new CustomEvent('lufan-firebase-auth-request',{detail:{mode,name,email,password}}))});
  $('lpfGoogleAuth').addEventListener('click',()=>window.dispatchEvent(new CustomEvent('lufan-firebase-google-request')));
- window.addEventListener('lufan-firebase-auth-state',e=>{auth=e.detail||{loggedIn:false};if(auth.loggedIn&&auth.name){profile.name=auth.name.slice(0,24);saveProfile()}renderAuth()});
+ window.addEventListener('lufan-firebase-auth-state',e=>{auth=e.detail||{loggedIn:false};if(auth.loggedIn&&auth.name&&!profile.name){profile.name=auth.name.slice(0,24)}renderAuth()});
+ window.addEventListener('lufan-cloud-profile-loaded',e=>{const d=e.detail||{};if(d.profile&&typeof d.profile==='object')profile={...profile,...d.profile};if(d.stats&&typeof d.stats==='object')stats={...stats,...d.stats};try{localStorage.setItem('lufanPlayerProfile',JSON.stringify(profile));localStorage.setItem(statsKey,JSON.stringify(stats))}catch(_){}render();toast(d.fromCloud?'Profile and stats synced from Firebase.':'Profile and stats uploaded to Firebase.')});
  window.addEventListener('lufan-firebase-auth-message',e=>toast(e.detail||'Authentication error.'));
  $('lpfLogoutButton').addEventListener('click',()=>{if(!auth.loggedIn){toast('You are not logged in.');return}confirmAction('Log Out?','Are you sure you want to logout from this device?',()=>window.dispatchEvent(new CustomEvent('lufan-firebase-logout-request')))});
  [editModal,confirmModal,authModal].forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')}));
@@ -966,6 +968,7 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
 <script type="module" id="lufan-firebase-auth">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signOut } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
+  import { getDatabase, ref, get, set } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCZrOVVTR_CbB3kGTLuEDzDmUShPeFCBlc",
@@ -979,6 +982,10 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
   };
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
+  const db = getDatabase(app);
+  let activeUid = '';
+  let cloudReady = false;
+  let saveQueue = Promise.resolve();
   const googleProvider = new GoogleAuthProvider();
   const $ = id => document.getElementById(id);
   function message(text){window.dispatchEvent(new CustomEvent('lufan-firebase-auth-message',{detail:text}));}
@@ -998,8 +1005,35 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
     };
     return map[code] || ('Could not sign in ('+(code||'unknown error')+'). Check Firebase Authentication settings and try again.');
   }
+  async function loadUserData(user){
+    activeUid=user.uid; cloudReady=false;
+    try{
+      const snapshot=await get(ref(db,'users/'+user.uid+'/lufanProfile'));
+      if(snapshot.exists()){
+        const data=snapshot.val()||{};
+        window.dispatchEvent(new CustomEvent('lufan-cloud-profile-loaded',{detail:{profile:data.profile||{},stats:data.stats||{},fromCloud:true}}));
+      }else{
+        // First sign-in: migrate this browser's existing profile and stats to this account.
+        const profile=JSON.parse(localStorage.getItem('lufanPlayerProfile')||'{}');
+        const stats=JSON.parse(localStorage.getItem('lufanPlayerStats')||'{"matches":0,"wins":0,"rolls":0,"streak":0}');
+        await set(ref(db,'users/'+user.uid+'/lufanProfile'),{profile,stats,updatedAt:Date.now()});
+        window.dispatchEvent(new CustomEvent('lufan-cloud-profile-loaded',{detail:{profile,stats,fromCloud:false}}));
+      }
+      cloudReady=true;
+    }catch(error){
+      cloudReady=false;
+      message(error?.code==='PERMISSION_DENIED'?'Firebase Database permission denied. Add the secure per-user rules provided in the setup instructions.':'Could not sync profile to Firebase. Check Realtime Database rules and connection.');
+    }
+  }
+  window.addEventListener('lufan-cloud-profile-save',event=>{
+    if(!activeUid||!cloudReady)return;
+    const data=event.detail||{};
+    saveQueue=saveQueue.then(()=>set(ref(db,'users/'+activeUid+'/lufanProfile'),{profile:data.profile||{},stats:data.stats||{},updatedAt:Date.now()})).catch(error=>message(error?.code==='PERMISSION_DENIED'?'Firebase Database permission denied. Check the secure per-user rules.':'Firebase profile save failed. Check your connection.'));
+  });
   onAuthStateChanged(auth,user=>{
+    cloudReady=false; activeUid=user?.uid||'';
     window.dispatchEvent(new CustomEvent('lufan-firebase-auth-state',{detail:user?{loggedIn:true,uid:user.uid,name:user.displayName||user.email?.split('@')[0]||'Player',email:user.email||''}:{loggedIn:false,name:'',email:'',uid:''}}));
+    if(user)loadUserData(user);
   });
   window.addEventListener('lufan-firebase-auth-request',async event=>{
     const {mode,name,email,password}=event.detail||{};
