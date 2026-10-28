@@ -1006,9 +1006,12 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
     return map[code] || ('Could not sign in ('+(code||'unknown error')+'). Check Firebase Authentication settings and try again.');
   }
   async function loadUserData(user){
-    activeUid=user.uid; cloudReady=false;
+    const uid=user.uid;
+    activeUid=uid; cloudReady=false;
     try{
-      const snapshot=await get(ref(db,'users/'+user.uid+'/lufanProfile'));
+      const snapshot=await get(ref(db,'users/'+uid+'/lufanProfile'));
+      // Ignore a late response if the active account changed while the read was pending.
+      if(!auth.currentUser || auth.currentUser.uid!==uid || activeUid!==uid)return;
       if(snapshot.exists()){
         const data=snapshot.val()||{};
         window.dispatchEvent(new CustomEvent('lufan-cloud-profile-loaded',{detail:{profile:data.profile||{},stats:data.stats||{},fromCloud:true}}));
@@ -1016,7 +1019,7 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
         // First sign-in: migrate this browser's existing profile and stats to this account.
         const profile=JSON.parse(localStorage.getItem('lufanPlayerProfile')||'{}');
         const stats=JSON.parse(localStorage.getItem('lufanPlayerStats')||'{"matches":0,"wins":0,"rolls":0,"streak":0}');
-        await set(ref(db,'users/'+user.uid+'/lufanProfile'),{profile,stats,updatedAt:Date.now()});
+        await set(ref(db,'users/'+uid+'/lufanProfile'),{profile,stats,updatedAt:Date.now()});
         window.dispatchEvent(new CustomEvent('lufan-cloud-profile-loaded',{detail:{profile,stats,fromCloud:false}}));
       }
       cloudReady=true;
@@ -1027,8 +1030,12 @@ document.getElementById('hostGame').addEventListener('click',()=>{if(roomMembers
   }
   window.addEventListener('lufan-cloud-profile-save',event=>{
     if(!activeUid||!cloudReady)return;
+    const uid=activeUid;
     const data=event.detail||{};
-    saveQueue=saveQueue.then(()=>set(ref(db,'users/'+activeUid+'/lufanProfile'),{profile:data.profile||{},stats:data.stats||{},updatedAt:Date.now()})).catch(error=>message(error?.code==='PERMISSION_DENIED'?'Firebase Database permission denied. Check the secure per-user rules.':'Firebase profile save failed. Check your connection.'));
+    saveQueue=saveQueue.then(()=>{
+      if(!cloudReady || !auth.currentUser || auth.currentUser.uid!==uid || activeUid!==uid)return;
+      return set(ref(db,'users/'+uid+'/lufanProfile'),{profile:data.profile||{},stats:data.stats||{},updatedAt:Date.now()});
+    }).catch(error=>message(error?.code==='PERMISSION_DENIED'?'Firebase Database permission denied. Check the secure per-user rules.':'Firebase profile save failed. Check your connection.'));
   });
   onAuthStateChanged(auth,user=>{
     cloudReady=false; activeUid=user?.uid||'';
